@@ -31,6 +31,7 @@ python = ">=3.8,<3.12"
 scikit-learn = ">=1.0.0"
 scipy = ">=1.7.3"
 tqdm = ">=4.63.0"
+xgboost = "^1.7.6"
 
 [tool.poetry.dev-dependencies]
 Cython = ">=0.29.24"

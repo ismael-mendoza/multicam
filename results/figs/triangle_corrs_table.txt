@@ -4,13 +4,13 @@
 \hline
 Model & $x_{\rm off}$,\,$\lambda_{\rm bullock}$ & $x_{\rm off}$,\,$c/a$ & $\lambda_{\rm bullock}$,\,$c/a$ \\ [0.5ex]
 \hline\hline
-\rm True & 0.51 & -0.43 & -0.29 \\
+\rm True & 0.50 & -0.43 & -0.27 \\
 \hline
-\rm CAM $a(m_{\rm opt})$ & 0.62 & -0.79 & -0.88 \\
+\rm CAM $a(m_{\rm opt})$ & 0.61 & -0.78 & -0.88 \\
 \hline
-\rm MultiCAM (no scatter) & 0.93 & -0.96 & -0.95 \\
+\rm MultiCAM (no scatter) & 0.92 & -0.96 & -0.96 \\
 \hline
-\rm MultiCAM (with scatter) & 0.50 & -0.45 & -0.31 \\
+\rm MultiCAM (with scatter) & 0.52 & -0.42 & -0.31 \\
 \hline
 \end{tabular}
 \caption{}

@@ -1,4 +1,4 @@
-import warnings
+"""Implements statistical models used to predict MAH from halo properties or vice-versa."""
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -7,6 +7,7 @@ from scipy.stats import rankdata
 from sklearn import linear_model
 from sklearn.feature_selection import SelectFromModel
 from sklearn.preprocessing import QuantileTransformer
+from xgboost import XGBRegressor
 
 from multicam.mah import get_an_from_am
 
@@ -78,6 +79,8 @@ class PredictionModelTransform(PredictionModel, ABC):
         self.qt_y = None
         self.y_train = None
         self.x_train = None
+        self.qt_pred = None
+        self.rank_lookup = {}
 
     def fit(self, x, y):
         assert len(x.shape) == len(y.shape) == 2
@@ -113,6 +116,24 @@ class PredictionModelTransform(PredictionModel, ABC):
 
         super().fit(x_trans, y_trans)
 
+        if self.use_multicam:
+            # get quantile transformer of prediction to (marginal) normal using training data.
+            xr_train = rankdata(self.x_train, axis=0, method="ordinal")
+            x_train_gauss = self.qt_xr.transform(xr_train)
+            y_pred_gauss = super().predict(x_train_gauss)
+            self.qt_pred = QuantileTransformer(
+                n_quantiles=len(y_pred_gauss), output_distribution="normal"
+            )
+            self.qt_pred.fit(y_pred_gauss)
+
+            # lookup table of ranks
+            for jj in range(self.x_train.shape[1]):
+                x_train_jj = np.sort(self.x_train[:, jj])
+                u, c = np.unique(x_train_jj, return_counts=True)
+                lranks = np.cumsum(c) - c + 1
+                hranks = np.cumsum(c)
+                self.rank_lookup[jj] = (u, lranks, hranks)
+
     @staticmethod
     def value_at_rank(x, ranks):
         """Get value at ranks of multidimensional array."""
@@ -128,21 +149,31 @@ class PredictionModelTransform(PredictionModel, ABC):
         assert len(x.shape) == 2
 
         if self.use_multicam:
-            # get ranks of test data.
-            xr = rankdata(x, axis=0, method="ordinal")
-            xr = (xr - 1) * (len(self.x_train) - 1) / (len(x) - 1) + 1
+            # get ranks of test data (based on training data)
+            xr = np.zeros_like(x) * np.nan
+            for jj in range(x.shape[1]):
+                x_jj = x[:, jj]
+                x_train_jj = np.sort(self.x_train[:, jj])
+                uniq, lranks, hranks = self.rank_lookup[jj]
+                xr[:, jj] = np.searchsorted(x_train_jj, x_jj) + 1  # indices to ranks
+
+                # if value is in training data, get uniform rank between low and high ranks.
+                in_train = np.isin(x_jj, uniq)
+                u_indices = np.searchsorted(uniq, x_jj[in_train])
+                lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
+                xr[in_train, jj] = (lr + hr) / 2
+
+            assert np.sum(np.isnan(xr)) == 0
+
             # transform ranks to be (marginally) gaussian.
             xr_trans = self.qt_xr.transform(xr)
 
             # predict on transformed ranks.
             yr_trans = super().predict(xr_trans)
 
-            # get quantile transformer of prediction to (marginal) normal.
-            qt_pred = QuantileTransformer(n_quantiles=len(yr_trans), output_distribution="normal")
-            qt_pred.fit(yr_trans)
-
             # inverse transform prediction to get ranks of target.
-            yr = self.qt_yr.inverse_transform(qt_pred.transform(yr_trans)).astype(int) - 1
+            yr = self.qt_yr.inverse_transform(self.qt_pred.transform(yr_trans)).astype(int)
+            yr -= 1  # ranks are 1-indexed, so subtract 1 to get 0-indexed.
 
             # predictions are points in train data corresponding to ranks predicted
             y_train_sorted = np.sort(self.y_train, axis=0)
@@ -241,6 +272,37 @@ class LinearRegression(PredictionModelTransform):
 
     def _fit(self, x, y):
         self.reg = linear_model.LinearRegression().fit(x, y)
+
+    def _predict(self, x):
+        return self.reg.predict(x)
+
+
+class XGB(PredictionModelTransform):
+    def __init__(
+        self,
+        n_features: int,
+        n_targets: int,
+        xgb_init_kwargs: dict = {},
+        xgb_fit_kwargs: dict = {},
+        **transform_kwargs,
+    ) -> None:
+        super().__init__(n_features, n_targets, **transform_kwargs)
+
+        assert "n_estimators" in xgb_init_kwargs
+        assert "max_depth" in xgb_init_kwargs
+        assert "eta" in xgb_init_kwargs or "learning_rate" in xgb_init_kwargs
+        assert "eval_metric" in xgb_init_kwargs
+        assert "early_stopping_rounds" in xgb_init_kwargs
+        assert "eval_set" in xgb_fit_kwargs
+
+        self.reg = None
+        self.xgb_init_kwargs = xgb_init_kwargs
+        self.xgb_fit_kwargs = xgb_fit_kwargs
+
+    def _fit(self, x, y):
+        xgb = XGBRegressor(**self.xgb_init_kwargs)
+        xgb.fit(x, y, **self.xgb_fit_kwargs)
+        self.reg = xgb
 
     def _predict(self, x):
         return self.reg.predict(x)

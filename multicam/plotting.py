@@ -99,7 +99,7 @@ def set_rc(
         "axes.prop_cycle": mpl.cycler(color=CB_COLORS),
         # images
         "image.cmap": cmap,
-        "image.interpolation": None,
+        "image.interpolation": "none",
         # legend
         "legend.loc": lgloc,
         "legend.fontsize": lgsize,
