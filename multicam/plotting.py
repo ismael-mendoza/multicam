@@ -45,6 +45,7 @@ LATEX_PARAMS_TNG = {
     "vmax/vvir": r"$V_{\rm max} / V_{\rm vir}$",
     "msmhmr": r"$\Delta \log (M_{\star})$",
     "g-r": r"$g-r$",
+    "f_gas": r"$f_{\rm gas}$",
     "SFR_vir": r"$\rm SFR$",
     "Mgas_vir": r"$M_{\rm gas}$",
     "Zgas_vir": r"$Z_{\rm gas}$",
