@@ -1,16 +1,7 @@
 """Our own implementation of quantile transformers."""
 
 import numpy as np
-from scipy.stats import norm
-
-
-def _get_ranks(x):
-    assert x.ndim == 1
-    # get ranks for each element of x
-    n = len(x)
-    ranks = np.zeros(n)
-    ranks[np.argsort(x)] = np.arange(n)
-    return ranks
+from scipy.stats import norm, rankdata
 
 
 def qt(x, y):
@@ -21,7 +12,7 @@ def qt(x, y):
     CREDIT: Phil Mansfield
     """
     assert x.ndim == 1 and y.ndim == 1
-    ranks = _get_ranks(x)
+    ranks = rankdata(x, axis=0) - 1  # want 0 indexed ranks
 
     # rescale to size of y and convert to indices/remainders
     ranks *= (len(y) - 1) / (len(x) - 1)
@@ -41,13 +32,14 @@ def qt(x, y):
 def qt_uniform(x):
     """Transform array to a uniform distribution based on ranks."""
     assert x.ndim == 1
-    ranks = _get_ranks(x)
+    ranks = rankdata(x, axis=0) - 1
     return ranks / (len(ranks) - 1)  # includes 0 and 1
 
 
 def qt_gauss(x):
     """Transform array to a Gaussian distribution based on ranks."""
-    eps = 1 / len(x) / 2
+    assert x.ndim == 1
+    eps = 1 / len(x) / 2  # ppf at 0 and 1 returns infinity, does not change rank
     u = qt_uniform(x)
     u_clipped = np.clip(u, eps, 1 - eps)
     return norm.ppf(u_clipped)
