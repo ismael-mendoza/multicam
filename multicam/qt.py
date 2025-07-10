@@ -29,17 +29,13 @@ def qt(x, y):
     return _y[idx] + dy[idx] * remainder
 
 
-def qt_uniform(x):
+def qt_uniform(x, axis: int = 0):
     """Transform array to a uniform distribution based on ranks."""
-    assert x.ndim == 1
-    ranks = rankdata(x, axis=0) - 1
-    return ranks / (len(ranks) - 1)  # includes 0 and 1
+    ranks = rankdata(x, axis=axis)
+    return ranks / (ranks.shape[axis] + 1)  # excludes 0 and 1
 
 
-def qt_gauss(x):
+def qt_gauss(x, axis: int = 0):
     """Transform array to a Gaussian distribution based on ranks."""
-    assert x.ndim == 1
-    eps = 1 / len(x) / 2  # ppf at 0 and 1 returns infinity, does not change rank
-    u = qt_uniform(x)
-    u_clipped = np.clip(u, eps, 1 - eps)
-    return norm.ppf(u_clipped)
+    u = qt_uniform(x, axis=axis)
+    return norm.ppf(u)
