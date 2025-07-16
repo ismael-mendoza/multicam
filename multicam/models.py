@@ -3,35 +3,17 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from numpy import random
 from scipy.interpolate import interp1d
-from scipy.stats import rankdata
 from sklearn import linear_model
-from sklearn.preprocessing import QuantileTransformer
+
+from multicam.qt import qt, qt_gauss
 
 
 def _get_an_from_am(am, mass_bins, mbin=0.498):
     """Return scale corresponding to first mass bin bigger than `mbin`."""
     idx = np.where(mass_bins > mbin)[0][0]
     return am[:, idx]
-
-
-def _value_at_rank(x, ranks):
-    """Get value at ranks of multidimensional array."""
-    assert x.shape[1] == ranks.shape[1]
-    assert ranks.dtype == int
-    n, m = ranks.shape
-    y = np.zeros((n, m), dtype=float)
-    for ii in range(m):
-        y[:, ii] = np.take(x[:, ii], ranks[:, ii])
-    return y
-
-
-def _gauss_transform(x: np.ndarray):
-    """Transform x to be (marginally) gaussian."""
-    assert x.ndim == 2
-    qt = QuantileTransformer(n_quantiles=len(x), output_distribution="normal")
-    qt.fit(x)
-    return qt.transform(x), qt
 
 
 class PredictionModel(ABC):
@@ -80,9 +62,9 @@ class MultiCAM(PredictionModel):
         self.qt_xr = None
         self.qt_yr = None
         self.qt_pred = None
-        self.rank_lookup = {}
         self.x_train = None
         self.y_train = None
+        self.rank_lookup = {}
 
         # setup linear regression model
         self.reg = linear_model.LinearRegression()
@@ -97,23 +79,13 @@ class MultiCAM(PredictionModel):
         self.x_train = x.copy()
         self.y_train = y.copy()
 
-        # first get ranks of features and targets.
-        xr = rankdata(x, axis=0, method="ordinal")
-        yr = rankdata(y, axis=0, method="ordinal")
-
-        # transform ranks to be (marginally) gaussian.
-        x_gauss, self.qt_xr = _gauss_transform(xr)
-        y_gauss, self.qt_yr = _gauss_transform(yr)
+        # transform variables to be (marginally) gaussian.
+        # default version accounts for repeated values
+        x_gauss = qt_gauss(x, axis=0)
+        y_gauss = qt_gauss(y, axis=0)
 
         # then fit a linear regression model to the transformed data.
         self.reg.fit(x_gauss, y_gauss)
-
-        # get quantile transformer of prediction to (marginal) normal using training data.
-        y_pred = self.reg.predict(x_gauss)
-        self.qt_pred = QuantileTransformer(
-            n_quantiles=len(y_pred), output_distribution="normal"
-        )
-        self.qt_pred.fit(y_pred)
 
         # finally, create lookup table for low and high ranks of each feature.
         for jj in range(self.n_features):
@@ -125,10 +97,10 @@ class MultiCAM(PredictionModel):
 
         return x_gauss, y_gauss
 
-    def _get_ranks(self, x, mode="middle"):
-        assert mode in {"middle", "random"}
+    def _get_ranks(self, x, rank_mode="middle"):
+        """Get ranks fo test data based on training data ranks."""
+        assert rank_mode in {"middle", "random"}
 
-        # get ranks of test data (based on training data)
         xr = np.zeros_like(x) * np.nan
         for jj in range(self.n_features):
             x_jj = x[:, jj]
@@ -140,12 +112,10 @@ class MultiCAM(PredictionModel):
             in_train = np.isin(x_jj, uniq)
             u_indices = np.searchsorted(uniq, x_jj[in_train])
             lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
-            xr[in_train, jj] = (
-                np.random.randint(lr, hr + 1) if mode == "random" else (lr + hr) / 2
-            )
+            _xr = random.randint(lr, hr + 1) if rank_mode == "random" else (lr + hr) / 2
+            xr[in_train, jj] = _xr
 
         assert np.sum(np.isnan(xr)) == 0
-
         return xr
 
     def _predict(self, x):
@@ -154,22 +124,21 @@ class MultiCAM(PredictionModel):
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
 
-        xr = self._get_ranks(x, mode="middle")
+        # get ranks of testing data corresponding to
+        xr = self._get_ranks(x, rank_mode="middle")
 
         # transform ranks to be (marginally) gaussian.
-        x_gauss = self.qt_xr.transform(xr)
+        # for 'middle' we actually want to output exactly the same y if x repeats
+        x_gauss = qt_gauss(xr, axis=0, method="average")
 
         # predict on transformed ranks.
         y_not_gauss = self.reg.predict(x_gauss)
 
-        # get quantile transformer of prediction to (marginal) normal.
-        y_gauss = self.qt_pred.transform(y_not_gauss)
-        yr = self.qt_yr.inverse_transform(y_gauss).astype(int)
-        yr -= 1  # ranks are 1-indexed, so subtract 1 to get 0-indexed.
-
-        # predictions are points in train data corresponding to ranks predicted
-        y_train_sorted = np.sort(self.y_train, axis=0)
-        y_pred = _value_at_rank(y_train_sorted, yr)
+        # now we just need to collect the elements of `y_train` that have the same
+        # corresponding rank as `y_not_gauss` (per feature)
+        y_pred = np.zeros((x.shape[0], self.n_features))
+        for jj in range(self.n_features):
+            y_pred[:, jj] = qt(y_not_gauss[:, jj], self.y_train[:, jj])
 
         return y_pred
 
@@ -272,9 +241,7 @@ class MultiCamSampling(MultiCAM):
         # get ranks of test data (based on training data)
         # use 'random' mode to account for uncertainty in ranks for each test point's features.
         xr = self._get_ranks(x, mode="random")
-
-        # transform ranks to be (marginally) gaussian.
-        x_gauss = self.qt_xr.transform(xr)
+        x_gauss = qt_gauss(xr, axis=0, method="ordinal")  # TODO: method?
 
         # sample on gaussianized ranks.
         _zero = np.zeros((self.n_targets,))
@@ -285,13 +252,10 @@ class MultiCamSampling(MultiCAM):
         assert y_gauss.shape == (n_points, self.n_targets)
         y_gauss += mu_cond
 
-        # transform y_gauss to be ranks
-        yr = self.qt_yr.inverse_transform(y_gauss).astype(int)
-        yr -= 1  # ranks are 1-indexed, so subtract 1 to get 0-indexed.
-
-        # predictions are points in train data corresponding to ranks predicted
-        y_train_sorted = np.sort(self.y_train, axis=0)
-        y_samples = _value_at_rank(y_train_sorted, yr)
+        # get samples
+        y_samples = np.zeros((x.shape[0], self.n_features))
+        for jj in range(self.n_features):
+            y_samples[:, jj] = qt(y_gauss[:, jj], self.y_train[:, jj])
 
         return y_samples
 
