@@ -1,8 +1,9 @@
 """Implementation of statistical models."""
 
 import numpy as np
-from numpy import linalg
+from numpy import linalg, random
 from numpy.typing import NDArray
+from scipy.stats import rankdata
 from sklearn import linear_model
 
 from multicam.base import PredictionModel
@@ -14,40 +15,81 @@ class MultiCAM(PredictionModel):
 
     def __init__(self, n_features: int, n_targets: int) -> None:
         super().__init__(n_features, n_targets)
+        self.x_train = None
+        self.y_train = None
         self.reg = linear_model.LinearRegression()
 
-    def _fit(self, x, y):
+    def _fit(self, x: NDArray, y: NDArray):
         """Fit model using training data"""
+        assert not self.trained
         assert np.sum(np.isnan(x)) == np.sum(np.isnan(y)) == 0
         assert x.shape == (y.shape[0], self.n_features)
         assert y.shape == (x.shape[0], self.n_targets)
 
-        # transform variables to be (marginally) gaussian.
-        x_gauss = qt_gauss(x, axis=0)
-        y_gauss = qt_gauss(y, axis=0)
+        # ranks need to be based on training set!
+        self.x_train = x.copy()
+        self.y_train = y.copy()
+
+        # transform variables to be (marginally) gaussian and break ties.
+        x_gauss = qt_gauss(x, axis=0, method="ordinal")
+        y_gauss = qt_gauss(y, axis=0, method="ordinal")
 
         # then fit a linear regression model to the transformed data.
         self.reg.fit(x_gauss, y_gauss)
 
-        return x_gauss, y_gauss
-
     def _predict(self, x, method="ordinal"):
+        # assume continuous data for now
         assert len(x.shape) == 2
         assert x.shape[1] == self.n_features
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
 
-        # transform ranks to be (marginally) gaussian.
-        x_gauss = qt_gauss(x, axis=0, method=method)
+        # first, for each dim of x, need to get the Gaussian value it corresponds to in the original
+        # gaussian distribution
+        # TODO: account for edges during interpolation?
+        x_gauss = np.zeros_like(x) * np.nan
+        for jj in range(self.n_features):
+            xt_jj = np.sort(self.x_train[:, jj], axis=0)
+            xt_gauss_jj = qt_gauss(xt_jj, axis=0, method="ordinal")
+            x_gauss[:, jj] = np.interp(x[:, jj], xt_jj, xt_gauss_jj)
+        assert np.all(~np.isnan(x_gauss))
 
-        # predict on transformed ranks.
+        # then use linear regression to get y_pred
         y_not_gauss = self.reg.predict(x_gauss)
 
-        # now we just need to collect the elements of `y_train` that have the same
-        # corresponding rank as `y_not_gauss` (per feature)
-        y_pred = np.zeros((x.shape[0], self.n_features))
-        for jj in range(self.n_features):
-            y_pred[:, jj] = qt(y_not_gauss[:, jj], self.y_train[:, jj])
+        # get ranks with respect to y_train (interp)
+        # TODO: edges during interpolation
+        yr = np.zeros_like(y_not_gauss) * np.nan
+        for kk in range(self.n_targets):
+            y_kk = y_not_gauss[:, kk]
+            ytg_kk = np.sort(qt_gauss(self.y_train[:, kk], axis=0, method="ordinal"))
+            ytr_kk = rankdata(ytg_kk, axis=0, method="ordinal")
+            yr[:, kk] = np.interp(y_kk, ytg_kk, ytr_kk)
+        assert np.all(~np.isnan(yr))
+
+        # return values of y_train with these ranks (interp)
+        # TODO: edges during interpolation
+        # do we need to discretize the ranks and just take directly from training
+        # i.e., do we interpolate in this step?
+        y_pred = np.zeros_like(yr) * np.nan
+        for kk in range(self.n_targets):
+            yr_kk = yr[:, kk]
+            yt_kk = np.sort(self.y_train[:, kk])
+            ytr_kk = rankdata(yt_kk, axis=0, method="ordinal")
+            y_pred[:, kk] = np.interp(yr_kk, ytr_kk, yt_kk)
+        assert np.all(~np.isnan(y_pred))
+
+        # # transform ranks to be (marginally) gaussian.
+        # x_gauss = qt_gauss(x, axis=0, method=method)
+
+        # # predict on transformed ranks.
+        # y_not_gauss = self.reg.predict(x_gauss)
+
+        # # now we just need to collect the elements of `y_train` that have the same
+        # # corresponding rank as `y_not_gauss` (per feature)
+        # y_pred = np.zeros((x.shape[0], self.n_features))
+        # for jj in range(self.n_features):
+        #     y_pred[:, jj] = qt(y_not_gauss[:, jj], self.y_train[:, jj])
 
         return y_pred
 
@@ -124,6 +166,39 @@ class MultiCamSampling(MultiCAM):
             y_samples[:, jj] = qt(y_gauss[:, jj], self.y_train[:, jj])
 
         return y_samples
+
+
+def _create_rank_lookup(x: NDArray):
+    assert x.ndim == 2
+    rank_lookup = {}
+    n_features = x.shape[1]
+    for jj in range(n_features):
+        u, c = np.unique(x[:, jj], return_counts=True)
+        lranks = np.cumsum(c) - c + 1
+        hranks = np.cumsum(c)
+        rank_lookup[jj] = (u, lranks, hranks)
+
+
+def _get_ranks(self, x, lookup, rank_mode="middle"):
+    """Get ranks based on training data."""
+    assert rank_mode in {"middle", "random"}
+
+    xr = np.zeros_like(x) * np.nan
+    for jj in range(self.n_features):
+        x_jj = x[:, jj]
+        x_train_jj = np.sort(self.x_train[:, jj])
+        uniq, lranks, hranks = lookup[jj]
+        xr[:, jj] = np.searchsorted(x_train_jj, x_jj) + 1  # indices to ranks
+
+        # if value is in training data, get middle or random rank
+        in_train = np.isin(x_jj, uniq)
+        u_indices = np.searchsorted(uniq, x_jj[in_train])
+        lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
+        _xr = random.randint(lr, hr + 1) if rank_mode == "random" else (lr + hr) / 2
+        xr[in_train, jj] = _xr
+
+    assert np.sum(np.isnan(xr)) == 0
+    return xr
 
 
 def get_mu_cond(
