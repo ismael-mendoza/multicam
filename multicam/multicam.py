@@ -57,14 +57,27 @@ class MultiCAM(PredictionModel):
         # then use linear regression to get y_pred
         y_not_gauss = self.reg.predict(x_gauss)
 
-        # get ranks with respect to y_train (interp)
-        # TODO: edges during interpolation
-        yr = np.zeros_like(y_not_gauss) * np.nan
+        # gaussianize the y_not_gauss usin g
+        y_pred_train = self.reg.predict(
+            qt_gauss(self.x_train, axis=0, method="ordinal")
+        )
+        # yg_pred_train = qt_gauss(y_pred_train)
+        y_gauss = np.zeros_like(y_not_gauss) * np.nan
         for kk in range(self.n_targets):
             y_kk = y_not_gauss[:, kk]
+            ypt_kk = np.sort(y_pred_train[:, kk])
+            yptg_kk = qt_gauss(ypt_kk, axis=0, method="ordinal")
+            y_gauss[:, kk] = np.interp(y_kk, ypt_kk, yptg_kk)
+        assert np.all(~np.isnan(y_gauss))
+
+        # get ranks with respect to y_train (interp)
+        # TODO: edges during interpolation
+        yr = np.zeros_like(y_gauss) * np.nan
+        for kk in range(self.n_targets):
+            yg_kk = y_gauss[:, kk]
             ytg_kk = np.sort(qt_gauss(self.y_train[:, kk], axis=0, method="ordinal"))
             ytr_kk = rankdata(ytg_kk, axis=0, method="ordinal")
-            yr[:, kk] = np.interp(y_kk, ytg_kk, ytr_kk)
+            yr[:, kk] = np.interp(yg_kk, ytg_kk, ytr_kk)
         assert np.all(~np.isnan(yr))
 
         # return values of y_train with these ranks (interp)
