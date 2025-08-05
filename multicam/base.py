@@ -17,6 +17,7 @@ class PredictionModel(ABC):
 
     def fit(self, x: NDArray, y: NDArray):
         """Fit model using training data."""
+        assert x.ndim == 2 and y.ndim == 2
         assert np.sum(np.isnan(x)) == np.sum(np.isnan(y)) == 0
         assert x.shape == (y.shape[0], self.n_features)
         assert y.shape == (x.shape[0], self.n_targets)
@@ -25,7 +26,7 @@ class PredictionModel(ABC):
 
     def predict(self, x: NDArray):
         """Predict y given x."""
-        assert len(x.shape) == 2
+        assert x.ndim == 2
         assert x.shape[1] == self.n_features
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
