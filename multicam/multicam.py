@@ -62,42 +62,10 @@ class MultiCAM(PredictionModel):
         y_pred_train = self.reg.predict(x_train_gauss)
         y_gauss = qt_gauss_base(y_not_gauss, y_pred_train)
 
-        # invert y_gauss to data space based on y_train_gauss
+        # invert y_gauss to data space based on gaussianized y_train.
         y_pred = qt_inverse_gauss_base(y_gauss, self.y_train)
 
         return y_pred
-
-        # yr = np.zeros_like(y_gauss) * np.nan
-        # for kk in range(self.n_targets):
-        #     yg_kk = y_gauss[:, kk]
-        #     ytr_kk = np.sort(rankdata(self.y_train[:, kk], axis=0, method="ordinal"))
-        #     ytg_kk = qt_gauss(ytr_kk, axis=0, method="ordinal")
-        #     yr[:, kk] = np.interp(yg_kk, ytg_kk, ytr_kk)
-        # assert np.all(~np.isnan(yr))
-
-        # # # return values of y_train with these ranks (interp)
-        # # TODO: edges during interpolation
-        # # do we need to discretize the ranks and just take directly from training
-        # # i.e., do we interpolate in this step?
-        # y_pred = np.zeros_like(yr) * np.nan
-        # for kk in range(self.n_targets):
-        #     yr_kk = yr[:, kk]
-        #     yt_kk = np.sort(self.y_train[:, kk])
-        #     ytr_kk = rankdata(yt_kk, axis=0, method="ordinal")
-        #     y_pred[:, kk] = np.interp(yr_kk, ytr_kk, yt_kk)
-        # assert np.all(~np.isnan(y_pred))
-
-        # # transform ranks to be (marginally) gaussian.
-        # x_gauss = qt_gauss(x, axis=0, method=method)
-
-        # # predict on transformed ranks.
-        # y_not_gauss = self.reg.predict(x_gauss)
-
-        # # now we just need to collect the elements of `y_train` that have the same
-        # # corresponding rank as `y_not_gauss` (per feature)
-        # y_pred = np.zeros((x.shape[0], self.n_features))
-        # for jj in range(self.n_features):
-        #     y_pred[:, jj] = qt(y_not_gauss[:, jj], self.y_train[:, jj])
 
 
 class MultiCamSampling(MultiCAM):
