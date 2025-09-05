@@ -14,11 +14,10 @@ from multicam.qt import (
 
 
 def multicam_prediction(x: ndarray, x_train: ndarray, y_train: ndarray):
-    """MultiCAM algorithm without the class scaffolding. Still very fast."""
+    """MultiCAM algorithm without the class scaffolding for utility. Still very fast as no QT."""
     assert x.ndim == x_train.ndim == y_train.ndim == 2
 
     # ranks are unnecessary to start as qt_gauss already uses 'ordinal'
-    # the one that we have to be careful with is `qt_gauss_base` below
     xgt = qt_gauss(x_train, axis=0)
     ygt = qt_gauss(y_train, axis=0)
 
@@ -36,9 +35,8 @@ def multicam_prediction(x: ndarray, x_train: ndarray, y_train: ndarray):
     yngt = reg.predict(xgt)
     yg = qt_gauss_base(yng, yngt)
 
-    # invert y_gauss to data space based on gaussianized y_train.
     yp = qt_inverse_gauss_base(yg, y_train)
-    return yp, yg, yng, xg
+    return yp
 
 
 class MultiCAM(PredictionModel):
@@ -129,7 +127,7 @@ class MultiCamSampling(MultiCAM):
         https://stats.stackexchange.com/questions/30588/deriving-the-conditional-distributions-of-a-multivariate-normal-distribution
         """
         xg, yg = super()._fit(x, y)  # gaussianized x and y
-        fit_params = fit_multi_gauss(xg, yg)
+        fit_params = _fit_multi_gauss(xg, yg)
 
         # update prediction attributes
         self.mu1 = fit_params["mu1"]
@@ -156,7 +154,7 @@ class MultiCamSampling(MultiCAM):
 
         # sample on gaussianized ranks.
         _zero = np.zeros((self.n_targets,))
-        mu_cond = get_mu_cond(
+        mu_cond = _get_mu_cond(
             xg,
             mu1=self.mu1,
             mu2=self.mu2,
@@ -221,7 +219,7 @@ def _create_rank_lookup(x):
     return rank_lookup
 
 
-def get_mu_cond(
+def _get_mu_cond(
     x: ndarray,
     *,
     mu1: ndarray,
@@ -237,7 +235,7 @@ def get_mu_cond(
     return mu_cond.T.reshape(n_points, -1)
 
 
-def fit_multi_gauss(x: ndarray, y: ndarray):
+def _fit_multi_gauss(x: ndarray, y: ndarray):
     """Return parameters of a multivariate Gaussian fit on input."""
     n_features = x.shape[1]
     n_targets = y.shape[1]
