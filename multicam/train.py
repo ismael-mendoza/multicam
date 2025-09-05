@@ -48,11 +48,24 @@ def training_suite(info: dict):
     return trained_models
 
 
+def get_tt_indices(n_points: int, rng=None, test_ratio=0.2):
+    if rng is None:
+        rng = np.random.default_rng()
+    test_size = int(np.ceil(test_ratio * n_points))
+    test_idx = rng.choice(range(n_points), replace=False, size=test_size)
+    assert len(test_idx) == len(set(test_idx))
+    train_idx = np.array(list(set(range(n_points)) - set(test_idx)))
+    assert set(train_idx).intersection(set(test_idx)) == set()
+    assert max(test_idx.max(), train_idx.max()) == n_points - 1
+    assert min(test_idx.min(), train_idx.min()) == 0
+    return train_idx, test_idx
+
+
 def prepare_datasets(cat, datasets: dict, rng, test_ratio=0.3):
     """Prepare datasets for training and testing."""
 
     # train/test split
-    train_idx, test_idx = _get_tt_indices(len(cat), rng, test_ratio=test_ratio)
+    train_idx, test_idx = get_tt_indices(len(cat), rng, test_ratio=test_ratio)
     cat_train, cat_test = cat[train_idx], cat[test_idx]
     output = {}
     for name in datasets:
@@ -74,16 +87,3 @@ def _tbl_to_arr(table, names=None):
         names = table.colnames
 
     return np.hstack([table[param].reshape(-1, 1) for param in names])
-
-
-def _get_tt_indices(n_points, rng=None, test_ratio=0.2):
-    if rng is None:
-        rng = np.random.default_rng(0)
-    test_size = int(np.ceil(test_ratio * n_points))
-    test_idx = rng.choice(range(n_points), replace=False, size=test_size)
-    assert len(test_idx) == len(set(test_idx))
-    train_idx = np.array(list(set(range(n_points)) - set(test_idx)))
-    assert set(train_idx).intersection(set(test_idx)) == set()
-    assert max(test_idx.max(), train_idx.max()) == n_points - 1
-    assert min(test_idx.min(), train_idx.min()) == 0
-    return train_idx, test_idx
