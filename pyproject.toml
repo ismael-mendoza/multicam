@@ -14,7 +14,7 @@ dependencies    = ["astropy >=4.3.1", "numpy >=1.22.0", "scikit-learn >=1.0.0", 
 requires-python = ">= 3.11"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "ipython", "ipykernel", "jupyter"]
+dev = ["pytest", "ruff", "ipython", "ipykernel", "jupyter", "matplotlib"]
 
 
 [project.urls]

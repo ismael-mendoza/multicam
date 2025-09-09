@@ -1,2 +1,2 @@
 # multicam
-Repository containing the MultiCAM algorithm as described in https://arxiv.org/abs/2302.01346
+Repository containing the implementation of the MultiCAM algorithm as described in https://arxiv.org/abs/2302.01346.
