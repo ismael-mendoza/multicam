@@ -1,7 +1,3 @@
-# unit tests: check it works for a very large number of data points, small number of datasets (2, 3) size of datasets. large training, small test, ...
-# ks test statistic for same distribution
-# discrete, repeated values
-
 import numpy as np
 from numpy.testing import assert_allclose
 from scipy.stats import ks_2samp, spearmanr
