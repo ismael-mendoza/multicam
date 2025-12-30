@@ -18,7 +18,6 @@ def test_1d_simple():
 
 
 def test_1d_interpol():
-    # does not interpolate correctly yet
     model = MultiCAM(1, 1)
 
     # perfectly monotonic 1D
@@ -27,9 +26,10 @@ def test_1d_interpol():
     model.fit(x, y)
 
     # check interpol
+    # correct as of 12/30/25
     x_test = np.array([0.11]).reshape(-1, 1)
     y_pred = model.predict(x_test)
-    assert_allclose(y_pred.item(), 2.0)
+    assert_allclose(y_pred.item(), 1.1)
 
 
 def test_1d_complex():

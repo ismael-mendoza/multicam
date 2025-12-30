@@ -6,11 +6,7 @@ from scipy.stats import rankdata
 from sklearn import linear_model
 
 from multicam.base import PredictionModel
-from multicam.qt import (
-    qt_gauss,
-    qt_gauss_base,
-    qt_inverse_gauss_base,
-)
+from multicam.qt import qt_gauss, qt_gauss_base, qt_inverse_gauss_base, qt_ranks_base
 
 
 def multicam_prediction(x: ndarray, x_train: ndarray, y_train: ndarray):
@@ -182,15 +178,14 @@ def _get_ranks_based(
     assert x_base.ndim == 2
     n_features = x.shape[1]
 
-    # get ranks of test data (based on training data)
-    xr = np.zeros_like(x) * np.nan
+    # start by interpolating ranks naively
+    xr = qt_ranks_base(x, x_base)
+
+    # if value is in training data, get middle or random rank
     for jj in range(n_features):
         x_jj = x[:, jj]
-        xb_jj = np.sort(x_base[:, jj])
         uniq, lranks, hranks = rank_lookup[jj]
-        xr[:, jj] = np.searchsorted(xb_jj, x_jj) + 1  # indices to ranks
 
-        # if value is in training data, get middle or random rank
         in_train = np.isin(x_jj, uniq)
         u_indices = np.searchsorted(uniq, x_jj[in_train])
         lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately

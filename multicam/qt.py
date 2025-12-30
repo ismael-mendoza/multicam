@@ -44,6 +44,21 @@ def qt_gauss(x, axis: int = 0, method="ordinal"):
     return norm.ppf(u)
 
 
+def qt_ranks_base(x: ndarray, x_base: ndarray):
+    """Gaussinize input based on another dataset."""
+    # always assume second dimension is n_features.
+    assert x.ndim == 2 and x_base.ndim == 2
+    assert x.shape[1] == x_base.shape[1]
+    n_features = x.shape[1]
+    x_ranks = np.zeros_like(x) * np.nan
+    for jj in range(n_features):
+        x_jj = x[:, jj]
+        xb_jj = np.sort(x_base[:, jj])  # required for np.interp
+        xb_ranks_jj = rankdata(xb_jj, method="ordinal")
+        x_ranks[:, jj] = np.interp(x_jj, xb_jj, xb_ranks_jj)
+    return x_ranks
+
+
 # TODO: account for edges?
 # TODO: consider pre-sorted input.
 def qt_gauss_base(x: ndarray, x_base: ndarray):
