@@ -39,6 +39,134 @@ def multicam_prediction(x: ndarray, x_train: ndarray, y_train: ndarray):
     return yp
 
 
+def _create_rank_lookup(x):
+    assert x.ndim == 2
+    n_features = x.shape[1]
+    rank_lookup = {}
+
+    # lookup table of ranks
+    for jj in range(n_features):
+        xjj = np.sort(x[:, jj])
+        u, c = np.unique(xjj, return_counts=True)
+        lranks = np.cumsum(c) - c + 1
+        hranks = np.cumsum(c)
+        rank_lookup[jj] = (u, lranks, hranks)
+
+    return rank_lookup
+
+
+def _get_ranks_based(
+    x: ndarray, x_base: ndarray, rank_lookup: dict, mode: str = "middle"
+):
+    assert mode in {"middle", "random"}
+    assert x.ndim == 2
+    assert x_base.ndim == 2
+    n_features = x.shape[1]
+
+    # get ranks of test data (based on training data)
+    xr = np.zeros_like(x) * np.nan
+    for jj in range(n_features):
+        x_jj = x[:, jj]
+        xb_jj = np.sort(x_base[:, jj])
+        uniq, lranks, hranks = rank_lookup[jj]
+        xr[:, jj] = np.searchsorted(xb_jj, x_jj) + 1  # indices to ranks
+
+        # if value is in training data, get middle or random rank
+        in_train = np.isin(x_jj, uniq)
+        u_indices = np.searchsorted(uniq, x_jj[in_train])
+        lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
+        xr[in_train, jj] = (
+            np.random.randint(lr, hr + 1) if mode == "random" else (lr + hr) / 2
+        )
+
+    assert np.sum(np.isnan(xr)) == 0
+
+    return xr
+
+
+def multicam_mah_prediction(mah: ndarray, mah_train: ndarray, y_train: ndarray):
+    """MultiCAM algorithm specialized to the case that full MAH are the features"""
+    assert mah.ndim == mah_train.ndim == y_train.ndim == 2
+    assert mah.min() == 0.0 and mah.max() == 1.0
+    assert mah_train.min() == 0.0 and mah_train.max() == 0.0
+    n_halos, n_snaps = mah_train.shape
+
+    # assign "rank" to each halo in training datataset based on when its MAH reaches 1.0
+    # simply use the snap when it reaches 1.0
+
+    # fill value refers to last snap which has to be 1.0
+    snap_rank = np.full(n_halos, fill_value=n_snaps - 1)
+    for ii in range(n_halos):
+        _rank = np.where(mah_train[ii] == 1.0)[0][0]
+        snap_rank[ii] = _rank
+
+    # now we construct a rank look up that preserves this order
+    # we ignore repetitions in data besides mah reaching max value
+    mah_ranks_train = np.zeros((n_halos, n_snaps)) * np.nan
+    for jj in range(n_snaps):
+        mah_jj = mah_train[:, jj]
+
+        if jj > 0:
+            # preserve previous rank if peak reached in last snapshot
+            _reach_peak = snap_rank <= jj - 1
+            mah_ranks_train[_reach_peak, jj] = mah_ranks_train[_reach_peak, jj - 1]
+        else:
+            # avoid first snapshot
+            _reach_peak = np.full(n_halos, fill_value=False).astype(bool)
+
+        # otherwise rank normally
+        mah_ranks_train[~_reach_peak, jj] = rankdata(
+            mah_jj[~_reach_peak], method="ordinal"
+        )
+
+    # get ranks for testing data also preserving order across snapshots if peak is reached
+    # based on training data
+    mah_ranks = np.zeros((mah.shape[0], n_snaps)) * np.nan
+
+    for jj in range(n_snaps):
+        if jj > 0:
+            # preserve rank if already reached peak
+            _peak_reached_last = mah[:, jj - 1] == 1.0
+            mah_ranks[_peak_reached_last, jj] = mah_ranks[_peak_reached_last, jj - 1]
+
+            # assign mean of training ranks that reached 1.0 if reached peak
+            _peak_reached_now = (mah[:, jj] == 1.0) & ~_peak_reached_last
+            _peak_reached_train = mah_train[:, jj] == 1.0
+
+            if _peak_reached_train.any():
+                _peak_train_ranks = mah_ranks_train[_peak_reached_train, jj]
+                mah_ranks[_peak_reached_now, jj] = _peak_train_ranks.mean()
+            else:
+                # assign maximum rank
+                mah_ranks[_peak_reached_now, jj] = mah_train.shape[0]
+
+            _normal = ~(mah[:, jj] == 1.0) & ~_peak_reached_last
+
+        else:
+            _normal = np.ones_like(mah[:, jj]).astype(bool)
+
+        # otherwise rank normally according to training data
+        _sort_train_jj = np.argsort(mah_train[:, jj])
+        xp = mah_train[_sort_train_jj, jj]
+        fp = mah_ranks_train[_sort_train_jj, jj]
+        mah_ranks[_normal, jj] = np.interp(mah[_normal, jj], xp, fp)
+
+    xgt = qt_gauss(mah_ranks_train, axis=0)
+    ygt = qt_gauss(y_train, axis=0)
+
+    reg = linear_model.LinearRegression()
+    reg.fit(xgt, ygt)
+
+    xg = qt_gauss_base(mah_ranks, mah_ranks_train)
+    yng = reg.predict(xg)
+
+    yngt = reg.predict(xgt)
+    yg = qt_gauss_base(yng, yngt)
+
+    yp = qt_inverse_gauss_base(yg, y_train)
+    return yp
+
+
 class MultiCAM(PredictionModel):
     """MultiCAM model described in our first paper."""
 
@@ -172,51 +300,6 @@ class MultiCamSampling(MultiCAM):
         y_samples = qt_inverse_gauss_base(y_gauss, self.y_train)
 
         return y_samples
-
-
-def _get_ranks_based(
-    x: ndarray, x_base: ndarray, rank_lookup: dict, mode: str = "middle"
-):
-    assert mode in {"middle", "random"}
-    assert x.ndim == 2
-    assert x_base.ndim == 2
-    n_features = x.shape[1]
-
-    # get ranks of test data (based on training data)
-    xr = np.zeros_like(x) * np.nan
-    for jj in range(n_features):
-        x_jj = x[:, jj]
-        xb_jj = np.sort(x_base[:, jj])
-        uniq, lranks, hranks = rank_lookup[jj]
-        xr[:, jj] = np.searchsorted(xb_jj, x_jj) + 1  # indices to ranks
-
-        # if value is in training data, get middle or random rank
-        in_train = np.isin(x_jj, uniq)
-        u_indices = np.searchsorted(uniq, x_jj[in_train])
-        lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
-        xr[in_train, jj] = (
-            np.random.randint(lr, hr + 1) if mode == "random" else (lr + hr) / 2
-        )
-
-    assert np.sum(np.isnan(xr)) == 0
-
-    return xr
-
-
-def _create_rank_lookup(x):
-    assert x.ndim == 2
-    n_features = x.shape[1]
-    rank_lookup = {}
-
-    # lookup table of ranks
-    for jj in range(n_features):
-        xjj = np.sort(x[:, jj])
-        u, c = np.unique(xjj, return_counts=True)
-        lranks = np.cumsum(c) - c + 1
-        hranks = np.cumsum(c)
-        rank_lookup[jj] = (u, lranks, hranks)
-
-    return rank_lookup
 
 
 def _get_mu_cond(
