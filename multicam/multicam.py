@@ -87,8 +87,8 @@ def _get_ranks_based(
 def multicam_mah_prediction(mah: ndarray, mah_train: ndarray, y_train: ndarray):
     """MultiCAM algorithm specialized to the case that full MAH are the features"""
     assert mah.ndim == mah_train.ndim == y_train.ndim == 2
-    assert mah.min() == 0.0 and mah.max() == 1.0
-    assert mah_train.min() == 0.0 and mah_train.max() == 0.0
+    assert mah.min() > 0.0 and mah.max() == 1.0
+    assert mah_train.min() > 0.0 and mah_train.max() == 0.0
     n_halos, n_snaps = mah_train.shape
 
     # assign "rank" to each halo in training datataset based on when its MAH reaches 1.0
