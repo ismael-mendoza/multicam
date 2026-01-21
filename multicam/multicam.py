@@ -159,8 +159,8 @@ def multicam_mah_prediction(mah: ndarray, mah_train: ndarray, y_train: ndarray):
 
     xg = qt_gauss_base(mah_ranks, mah_ranks_train)
     yng = reg.predict(xg)
-
     yngt = reg.predict(xgt)
+
     yg = qt_gauss_base(yng, yngt)
 
     yp = qt_inverse_gauss_base(yg, y_train)
