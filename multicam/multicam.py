@@ -58,6 +58,7 @@ class MultiCAM(PredictionModel):
         # gaussianize x based on x_train
         xr = _get_ranks_based(x, self.x_train, self.rank_lookup, mode="middle")
         xrt = rankdata(self.x_train, axis=0, method="ordinal")
+        print(xr.shape)
         xg = qt_gauss_base(xr, xrt)
 
         # predict gaussianized target with linear regression
@@ -150,7 +151,7 @@ class MultiCamSampling(MultiCAM):
 
 def _get_ranks_based(
     x: ndarray, x_base: ndarray, rank_lookup: dict, mode: str = "middle"
-):
+) -> ndarray:
     assert mode in {"middle", "random"}
     assert x.ndim == 2
     assert x_base.ndim == 2
@@ -172,6 +173,7 @@ def _get_ranks_based(
         )
 
     assert np.sum(np.isnan(xr)) == 0
+    return xr
 
 
 def _create_rank_lookup(x):
