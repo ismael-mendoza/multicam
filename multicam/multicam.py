@@ -7,36 +7,12 @@ from sklearn import linear_model
 
 from multicam.base import PredictionModel
 from multicam.qt import (
+    qt,
     qt_gauss,
     qt_gauss_base,
     qt_inverse_gauss_base,
+    qt_ranks_base,
 )
-
-
-def multicam_prediction(x: ndarray, x_train: ndarray, y_train: ndarray):
-    """MultiCAM algorithm without the class scaffolding for utility. Still very fast as no QT."""
-    assert x.ndim == x_train.ndim == y_train.ndim == 2
-
-    # ranks are unnecessary to start as qt_gauss already uses 'ordinal'
-    xgt = qt_gauss(x_train, axis=0)
-    ygt = qt_gauss(y_train, axis=0)
-
-    reg = linear_model.LinearRegression()
-    reg.fit(xgt, ygt)
-
-    rank_lookup = _create_rank_lookup(x_train)
-
-    xr = _get_ranks_based(x, x_train, rank_lookup, mode="middle")
-    xrt = rankdata(x_train, axis=0, method="ordinal")
-    xg = qt_gauss_base(xr, xrt)
-
-    yng = reg.predict(xg)
-
-    yngt = reg.predict(xgt)
-    yg = qt_gauss_base(yng, yngt)
-
-    yp = qt_inverse_gauss_base(yg, y_train)
-    return yp
 
 
 class MultiCAM(PredictionModel):
@@ -57,26 +33,22 @@ class MultiCAM(PredictionModel):
         assert x.shape == (y.shape[0], self.n_features)
         assert y.shape == (x.shape[0], self.n_targets)
 
-        # ranks need to be based on training set!
         self.x_train = x.copy()
-        self.y_train = y.copy()
 
         # transform variables to be (marginally) gaussian and break ties.
-        xg = qt_gauss(x, axis=0)
-        yg = qt_gauss(y, axis=0)
+        xg = qt_gauss(x, axis=0, method="ordinal")
+        yg = qt_gauss(y, axis=0, method="ordinal")
 
         # then fit a linear regression model to the transformed data.
         self.reg.fit(xg, yg)
 
-        # ranks based on training x data for prediction.
+        # create lookup table for ranks in training features
+        # useful specifically for features with repetitions.
         self.rank_lookup = _create_rank_lookup(self.x_train)
-
-        # prediction on training data needed for gaussianization of prediction
-        self.y_not_gauss_train = self.reg.predict(xg)
 
         return xg, yg
 
-    def _predict(self, x):
+    def _predict(self, x, y_target):
         # assume continuous data for now
         assert len(x.shape) == 2
         assert x.shape[1] == self.n_features
@@ -88,16 +60,18 @@ class MultiCAM(PredictionModel):
         xrt = rankdata(self.x_train, axis=0, method="ordinal")
         xg = qt_gauss_base(xr, xrt)
 
-        # predict with linear regression
-        yng = self.reg.predict(xg)
+        # predict gaussianized target with linear regression
+        yg = self.reg.predict(xg)
 
-        # gaussianize the y_not_gauss using the predictions on train data.
-        yg = qt_gauss_base(yng, self.y_not_gauss_train)
+        # KEY: finally we want to reproduce some final 'true' distribution
+        # so we abundance match each corresponding target variable outputed from the LR prediction
+        yp = np.full_like(yg, fill_value=np.nan)
+        for ii in range(self.n_targets):
+            # avoid repeats 'bunching up' to reproduce correct output distribution in ALL cases.
+            # qt handles this internally by using "ordinal"
+            yp[:, ii] = qt(yg[:, ii], y_target[:, ii])  # correctly interpolates
 
-        # invert y_gauss to data space based on gaussianized y_train.
-        y_pred = qt_inverse_gauss_base(yg, self.y_train)
-
-        return y_pred
+        return yp
 
 
 class MultiCamSampling(MultiCAM):
@@ -182,15 +156,14 @@ def _get_ranks_based(
     assert x_base.ndim == 2
     n_features = x.shape[1]
 
-    # get ranks of test data (based on training data)
-    xr = np.zeros_like(x) * np.nan
+    # start by interpolating ranks naively
+    xr = qt_ranks_base(x, x_base)
+
+    # if value is in training data, get middle or random rank
     for jj in range(n_features):
         x_jj = x[:, jj]
-        xb_jj = np.sort(x_base[:, jj])
         uniq, lranks, hranks = rank_lookup[jj]
-        xr[:, jj] = np.searchsorted(xb_jj, x_jj) + 1  # indices to ranks
 
-        # if value is in training data, get middle or random rank
         in_train = np.isin(x_jj, uniq)
         u_indices = np.searchsorted(uniq, x_jj[in_train])
         lr, hr = lranks[u_indices], hranks[u_indices]  # repeat appropriately
@@ -199,8 +172,6 @@ def _get_ranks_based(
         )
 
     assert np.sum(np.isnan(xr)) == 0
-
-    return xr
 
 
 def _create_rank_lookup(x):
