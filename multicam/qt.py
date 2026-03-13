@@ -72,3 +72,18 @@ def qt_inverse_gauss_base(x_gauss: ndarray, x_base: ndarray):
         xb_gauss_jj = qt_gauss(xb_jj, method="ordinal")
         x_out[:, jj] = np.interp(xg_jj, xb_gauss_jj, xb_jj)
     return x_out
+
+
+def qt_ranks_base(x: ndarray, x_base: ndarray):
+    """Gaussinize input based on another dataset."""
+    # always assume second dimension is n_features.
+    assert x.ndim == 2 and x_base.ndim == 2
+    assert x.shape[1] == x_base.shape[1]
+    n_features = x.shape[1]
+    x_ranks = np.zeros_like(x) * np.nan
+    for jj in range(n_features):
+        x_jj = x[:, jj]
+        xb_jj = np.sort(x_base[:, jj])  # required for np.interp
+        xb_ranks_jj = rankdata(xb_jj, method="ordinal")
+        x_ranks[:, jj] = np.interp(x_jj, xb_jj, xb_ranks_jj)
+    return x_ranks
