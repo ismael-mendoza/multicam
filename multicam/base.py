@@ -24,18 +24,18 @@ class PredictionModel(ABC):
         self._fit(x, y)
         self.trained = True
 
-    def predict(self, x: NDArray):
+    def predict(self, x: NDArray, **kwargs):
         """Predict y given x."""
         assert x.ndim == 2
         assert x.shape[1] == self.n_features
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
-        return self._predict(x).reshape(x.shape[0], self.n_targets)
+        return self._predict(x, **kwargs).reshape(x.shape[0], self.n_targets)
 
     @abstractmethod
     def _fit(self, x, y):
         pass
 
     @abstractmethod
-    def _predict(self, x):
+    def _predict(self, x, **kwargs):
         pass

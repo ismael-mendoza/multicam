@@ -48,7 +48,7 @@ class MultiCAM(PredictionModel):
 
         return xg, yg
 
-    def _predict(self, x, y_target):
+    def _predict(self, x: ndarray, *, y_target: ndarray):
         # assume continuous data for now
         assert len(x.shape) == 2
         assert x.shape[1] == self.n_features
