@@ -5,8 +5,8 @@ from numpy import ndarray
 from scipy.stats import norm, rankdata
 
 
-def qt(x, y):
-    """Performs a quantile transformation from x -> y marginally over first axis.
+def qt(x: ndarray, y: ndarray):
+    """Performs a quantile transformation from x -> y.
 
     Returns what values would x have if they had the same ranks within the y
     distribution.
