@@ -58,7 +58,6 @@ class MultiCAM(PredictionModel):
         # gaussianize x based on x_train
         xr = _get_ranks_based(x, self.x_train, self.rank_lookup, mode="middle")
         xrt = rankdata(self.x_train, axis=0, method="ordinal")
-        print(xr.shape)
         xg = qt_gauss_base(xr, xrt)
 
         # predict gaussianized target with linear regression
