@@ -16,6 +16,9 @@ requires-python = ">= 3.11"
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "ipython", "ipykernel", "jupyter", "matplotlib"]
 
+[tool.uv]
+exclude-newer = "1 week"
+
 
 [project.urls]
 home = "https://github.com/ismael-mendoza/multicam"
