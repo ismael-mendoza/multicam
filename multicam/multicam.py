@@ -94,6 +94,7 @@ class MultiCamSampling(MultiCAM):
         """
 
         # see parent class procedure
+        self.x_train = x.copy()
         self.rank_lookup = _create_rank_lookup(self.x_train)
         xg = qt_gauss(x, axis=0, method="ordinal")
         yg = qt_gauss(y, axis=0, method="ordinal")
