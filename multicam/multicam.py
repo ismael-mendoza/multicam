@@ -120,7 +120,7 @@ class MultiCamSampling(MultiCAM):
         rng = default_rng(42) if seed is None else default_rng(seed)
         n_points = x.shape[0]
 
-        xg = self._gaussianize_test_features(x, mode="random")
+        xg = _gaussianize_test_features(x, x_base=self.x_train, mode="random")
 
         # sample on gaussianized ranks.
         _zero = np.zeros((self.n_targets,))
