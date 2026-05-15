@@ -2,85 +2,77 @@
 
 import numpy as np
 from numpy import linalg, ndarray
+from numpy.random import default_rng
 from scipy.stats import rankdata
 from sklearn import linear_model
 
-from multicam.base import PredictionModel
-from multicam.qt import (
-    qt,
-    qt_gauss,
-    qt_gauss_base,
-    qt_inverse_gauss_base,
-    qt_ranks_base,
-)
+from multicam.qt import qt, qt_gauss, qt_gauss_base, qt_ranks_base
 
 
-class MultiCAM(PredictionModel):
+class MultiCAM:
     """MultiCAM model described in our first paper."""
 
     def __init__(self, n_features: int, n_targets: int) -> None:
-        super().__init__(n_features, n_targets)
+        assert isinstance(n_features, int) and n_features > 0
+        assert isinstance(n_targets, int) and n_targets > 0
+        self.n_features = n_features
+        self.n_targets = n_targets
         self.x_train = None
-        self.y_train = None
-        self.y_not_gauss_train = None
         self.rank_lookup = None
-        self.reg = linear_model.LinearRegression()
+        self.trained = False
+        self.reg = None
 
-    def _fit(self, x: ndarray, y: ndarray):
+    def fit(self, x: ndarray, y: ndarray) -> None:
         """Fit model using training data"""
         assert not self.trained
+        assert x.ndim == 2 and y.ndim == 2
         assert np.sum(np.isnan(x)) == np.sum(np.isnan(y)) == 0
         assert x.shape == (y.shape[0], self.n_features)
         assert y.shape == (x.shape[0], self.n_targets)
 
         self.x_train = x.copy()
 
+        # create lookup table for ranks in training features
+        # useful esp. for features with repetitions.
+        self.rank_lookup = _create_rank_lookup(self.x_train)
+
         # transform variables to be (marginally) gaussian and break ties.
         xg = qt_gauss(x, axis=0, method="ordinal")
         yg = qt_gauss(y, axis=0, method="ordinal")
 
         # then fit a linear regression model to the transformed data.
+        self.reg = linear_model.LinearRegression()
         self.reg.fit(xg, yg)
 
-        # create lookup table for ranks in training features
-        # useful specifically for features with repetitions.
-        self.rank_lookup = _create_rank_lookup(self.x_train)
+        self.trained = True
 
-        return xg, yg
-
-    def _predict(self, x: ndarray, *, y_target: ndarray):
+    def predict(self, x: ndarray, *, y_target: ndarray) -> ndarray:
         # assume continuous data for now
+        assert len(x) > 1, "MultiCAM works with distributions, not single data points."
         assert len(x.shape) == 2
         assert x.shape[1] == self.n_features
+        assert y_target.shape[1] == self.n_targets
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
 
-        # gaussianize x based on x_train
-        xr = _get_ranks_based(x, self.x_train, self.rank_lookup, mode="middle")
-        xrt = rankdata(self.x_train, axis=0, method="ordinal")
-        xg = qt_gauss_base(xr, xrt)
+        xg = _gaussianize_test_features(x, x_base=self.x_train, mode="middle")
 
         # predict gaussianized target with linear regression
         yg = self.reg.predict(xg)
 
         # KEY: finally we want to reproduce some final 'true' distribution
         # so we abundance match each corresponding target variable outputed from the LR prediction
-        yp = np.full_like(yg, fill_value=np.nan)
-        for ii in range(self.n_targets):
-            # avoid repeats 'bunching up' to reproduce correct output distribution in ALL cases.
-            # qt handles this internally by using "ordinal"
-            yp[:, ii] = qt(yg[:, ii], y_target[:, ii])  # correctly interpolates
-
-        return yp
+        # Also, avoid repeats 'bunching up' to reproduce correct output distribution in ALL cases.
+        # qt handles this internally by using "ordinal"
+        return _abundance_match_all(yg, y_target)
 
 
 class MultiCamSampling(MultiCAM):
     """Multi-Variate Gaussian w/ full covariance matrix (returns conditional mean)."""
 
-    def __init__(self, n_features: int, n_targets: int, rng=None) -> None:
+    def __init__(self, n_features: int, n_targets: int) -> None:
         super().__init__(n_features, n_targets)
 
-        self.rng = np.random.default_rng(42) if rng is None else rng
         self.mu1 = None
         self.mu2 = None
         self.rho = None
@@ -92,7 +84,7 @@ class MultiCamSampling(MultiCAM):
         self.Sigma = None
         self.rho = None
 
-    def _fit(self, x, y):
+    def fit(self, x: ndarray, y: ndarray) -> None:
         """
         Fit the Gaussian model.
 
@@ -100,52 +92,67 @@ class MultiCamSampling(MultiCAM):
         P(Y | X) = uses the rules here:
         https://stats.stackexchange.com/questions/30588/deriving-the-conditional-distributions-of-a-multivariate-normal-distribution
         """
-        xg, yg = super()._fit(x, y)  # gaussianized x and y
+
+        # see parent class procedure
+        self.rank_lookup = _create_rank_lookup(self.x_train)
+        xg = qt_gauss(x, axis=0, method="ordinal")
+        yg = qt_gauss(y, axis=0, method="ordinal")
+
         fit_params = _fit_multi_gauss(xg, yg)
 
         # update prediction attributes
-        self.mu1 = fit_params["mu1"]
-        self.mu2 = fit_params["mu2"]
-        self.Sigma11 = fit_params["Sigma11"]
-        self.Sigma12 = fit_params["Sigma12"]
-        self.Sigma22 = fit_params["Sigma22"]
-        self.sigma_bar = fit_params["sigma_bar"]
-        self.Sigma = fit_params["Sigma"]
-        self.rho = fit_params["rho"]
+        for k in fit_params:
+            assert getattr(self, k) is None
+            setattr(self, k, fit_params[k])
 
-    def sample(self, x):
+        self.trained = True
+
+    def sample(
+        self, x: ndarray, *, y_target: ndarray, seed: int | None = None
+    ) -> ndarray:
         """Sample (once) from the conditional distribution P(y | x)"""
         assert len(x.shape) == 2
         assert x.shape[1] == self.n_features
         assert np.sum(np.isnan(x)) == 0
         assert self.trained
 
+        rng = default_rng(42) if seed is None else default_rng(seed)
         n_points = x.shape[0]
 
-        # gaussianize input data based on training one
-        xr = _get_ranks_based(x, self.x_train, self.rank_lookup, mode="random")
-        xg = qt_gauss(xr, axis=0)
+        xg = self._gaussianize_test_features(x, mode="random")
 
         # sample on gaussianized ranks.
         _zero = np.zeros((self.n_targets,))
         mu_cond = _get_mu_cond(
-            xg,
-            mu1=self.mu1,
-            mu2=self.mu2,
-            Sigma12=self.Sigma12,
-            Sigma22=self.Sigma22,
+            xg, mu1=self.mu1, mu2=self.mu2, Sigma12=self.Sigma12, Sigma22=self.Sigma22
         )
-        y_gauss = self.rng.multivariate_normal(
+        y_gauss = rng.multivariate_normal(
             mean=_zero, cov=self.sigma_bar, size=(n_points,)
         )
         assert y_gauss.shape == (n_points, self.n_targets)
         y_gauss += mu_cond
 
-        # interpolate, by definition y_gauss follows a Gaussian distribution (in each feature)
-        # no need to do another transformation
-        y_samples = qt_inverse_gauss_base(y_gauss, self.y_train)
+        # abundance match on sampled y_gauss
+        # ALWAYS follow target distribution marginally
+        y_samples = _abundance_match_all(y_gauss, y_target)
 
         return y_samples
+
+
+def _create_rank_lookup(x) -> dict:
+    assert x.ndim == 2
+    n_features = x.shape[1]
+    rank_lookup = {}
+
+    # lookup table of ranks
+    for jj in range(n_features):
+        xjj = np.sort(x[:, jj])
+        u, c = np.unique(xjj, return_counts=True)
+        lranks = np.cumsum(c) - c + 1
+        hranks = np.cumsum(c)
+        rank_lookup[jj] = (u, lranks, hranks)
+
+    return rank_lookup
 
 
 def _get_ranks_based(
@@ -175,20 +182,21 @@ def _get_ranks_based(
     return xr
 
 
-def _create_rank_lookup(x):
-    assert x.ndim == 2
-    n_features = x.shape[1]
-    rank_lookup = {}
+def _gaussianize_test_features(x: ndarray, *, x_base: ndarray, mode: str) -> ndarray:
+    _rank_lookup = _create_rank_lookup(x_base)
+    xr = _get_ranks_based(x, x_base, _rank_lookup, mode=mode)
+    xrt = rankdata(x_base, axis=0, method="ordinal")
+    return qt_gauss_base(xr, xrt)
 
-    # lookup table of ranks
-    for jj in range(n_features):
-        xjj = np.sort(x[:, jj])
-        u, c = np.unique(xjj, return_counts=True)
-        lranks = np.cumsum(c) - c + 1
-        hranks = np.cumsum(c)
-        rank_lookup[jj] = (u, lranks, hranks)
 
-    return rank_lookup
+def _abundance_match_all(x: ndarray, y: ndarray) -> ndarray:
+    """Abundance match each dimension separately."""
+    assert x.shape[1] == y.shape[1]
+    n_targets = x.shape[1]
+    xp = np.full_like(x, fill_value=np.nan)
+    for ii in range(n_targets):
+        xp[:, ii] = qt(x[:, ii], y[:, ii])
+    return xp
 
 
 def _get_mu_cond(
@@ -198,7 +206,7 @@ def _get_mu_cond(
     mu2: ndarray,
     Sigma12: ndarray,
     Sigma22: ndarray,
-):
+) -> ndarray:
     """Mean of distribution P(Y|X)."""
     assert np.sum(np.isnan(x)) == 0
     n_points = x.shape[0]
@@ -207,7 +215,7 @@ def _get_mu_cond(
     return mu_cond.T.reshape(n_points, -1)
 
 
-def _fit_multi_gauss(x: ndarray, y: ndarray):
+def _fit_multi_gauss(x: ndarray, y: ndarray) -> dict[str, ndarray]:
     """Return parameters of a multivariate Gaussian fit on input."""
     n_features = x.shape[1]
     n_targets = y.shape[1]
