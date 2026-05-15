@@ -9,7 +9,7 @@ def qt(x: ndarray, y: ndarray):
     """Performs a quantile transformation from x -> y.
 
     Returns what values would x have if they had the same ranks within the y
-    distribution.
+    distribution. Boundaries are handled explicitly via interpolation.
 
     CREDIT: Phil Mansfield
     """
