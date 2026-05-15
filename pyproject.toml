@@ -10,11 +10,14 @@ description     = "Implementation of MultiCAM algorithm"
 version         = "0.0.1"
 license         = { file = "LICENSE" }
 readme          = "README.md"
-dependencies    = ["astropy >=4.3.1", "numpy >=1.22.0", "scikit-learn >=1.0.0", "scipy >=1.7.3"]
+dependencies    = ["numpy >=1.22.0", "scikit-learn >=1.0.0", "scipy >=1.7.3"]
 requires-python = ">= 3.11"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "ipython", "ipykernel", "jupyter", "matplotlib"]
+
+[tool.uv]
+exclude-newer = "1 week"
 
 
 [project.urls]
