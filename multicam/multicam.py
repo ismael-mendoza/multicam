@@ -109,7 +109,12 @@ class MultiCamSampling(MultiCAM):
         self.trained = True
 
     def sample(
-        self, x: ndarray, *, y_target: ndarray, seed: int | None = None
+        self,
+        x: ndarray,
+        *,
+        y_target: ndarray,
+        seed: int | None = None,
+        no_scatter: bool = False,
     ) -> ndarray:
         """Sample (once) from the conditional distribution P(y | x)"""
         assert len(x.shape) == 2
@@ -127,9 +132,13 @@ class MultiCamSampling(MultiCAM):
         mu_cond = _get_mu_cond(
             xg, mu1=self.mu1, mu2=self.mu2, Sigma12=self.Sigma12, Sigma22=self.Sigma22
         )
-        y_gauss = rng.multivariate_normal(
-            mean=_zero, cov=self.sigma_bar, size=(n_points,)
-        )
+
+        if no_scatter:
+            y_gauss = mu_cond
+        else:
+            y_gauss = rng.multivariate_normal(
+                mean=_zero, cov=self.sigma_bar, size=(n_points,)
+            )
         assert y_gauss.shape == (n_points, self.n_targets)
         y_gauss += mu_cond
 
